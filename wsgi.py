@@ -14,7 +14,7 @@ except IOError:
 # line, it's possible required libraries won't be in your searchable path
 #
 
-from gtfs-server import app as application
+from gtfstus import app as application
 
 #
 # Below for testing only
