@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
- 
-"""
+
+'''
 Genera feeds GTFS en tiempo real a partir de datos de la empresa de autobuses TUS
 Requiere los paquetes Python:
 pip install flask requests python-dateutil --no-no-cache-dir
 pip freeze
-"""
- 
+'''
+
 __author__ = "Emilio Gomez Fernandez"
 __copyright__ = "Copyright 2016, Emilio Gomez Fernandez"
- 
+
 __version__ = "0.1"
 __maintainer__ = "Emilio Gomez Fernandez"
 __email__ = "emiliogf@altergeosistemas.com"
@@ -20,44 +20,46 @@ __date__ = "Noviembre de 2016"
 import os
 import gtfs_realtime_pb2 as gtfsrtpb
 import time
-from datetime import datetime
-from google.protobuf import text_format
-from flask import Flask, send_file, make_response
 import io
 import json
 import requests
 import dateutil.parser
-
+from datetime import datetime
+from google.protobuf import text_format
+from flask import Flask, send_file, make_response, abort, request
+from argparse import ArgumentParser
 
 app = Flask(__name__)
 
+VEHICLES_POSITIONS = 'http://datos.santander.es/api/rest/datasets/control_flotas_posiciones.json'
+TRIP_UPDATES = 'http://datos.santander.es/api/rest/datasets/control_flotas_estimaciones.json'
 
 #Feed Header
 def buildHeader():
     fm = gtfsrtpb.FeedMessage()
     fh = fm.header
     fh.gtfs_realtime_version = "1.0"
-    fh.incrementality = 0 #Determina si la búsqueda actual es incremental (valor por defecto).
-    fh.timestamp = int(time.mktime(datetime.now().timetuple())) #Momento en que se creó el contenido de este feed (en tiempo del servidor). En tiempo UNIX.
+    fh.incrementality = 0  # Determina si la búsqueda actual es incremental (valor por defecto).
+    fh.timestamp = int(time.mktime(datetime.now().timetuple()))  # Momento en que se creó el contenido de este feed (en tiempo del servidor). En tiempo UNIX.
     return fm
 
 #Feed Vehicle Positions
 def buildVehiclePosition():
-    r = requests.get('http://datos.santander.es/api/rest/datasets/control_flotas_posiciones.json')
+    r = requests.get(VEHICLES_POSITIONS)
     data = r.json()
-    
+
     fm = buildHeader()
     for item in data['resources']:
 
         timez = dateutil.parser.parse(item['ayto:instante']) #Hora UTC
-        
+
         fe = fm.entity.add()
         fe.id = 'vehicle_position_' + str(item['ayto:vehiculo'])
-        
+
         fe.vehicle.trip.trip_id = str(item['ayto:servicio']) #¡OJO! REVISAR: El trip_id del feed GTFS al cual hace referencia este selector.
 
         fe.vehicle.trip.schedule_relationship = 0 #SCHEDULED: Viaje que se está ejecutando de acuerdo con su programa de GTFS (lo suficientemente parecido a él).
-        fe.vehicle.trip.route_id = str(item['ayto:linea']) #Cambiar GTFS. Se corresponde con las líneas http://datos.santander.es/api/rest/datasets/lineas_bus.csv 
+        fe.vehicle.trip.route_id = 'TUS-' + str(item['ayto:linea']) #Se ajusta el route_id al identificador del GTFS añadiendo el prefijo 'TUS-'
 
         fe.vehicle.timestamp = int(time.mktime(timez.timetuple())) #Momento en el cual se midió la posición del autobús. En tiempo UNIX.
         fe.vehicle.vehicle.id = str(item['ayto:vehiculo']) #Identificación interna del sistema para el autobus.
@@ -72,23 +74,38 @@ def buildVehiclePosition():
 
 #Feed Trip Updates
 def buildTripUpdate():
-    r = requests.get('http://datos.santander.es/api/rest/datasets/control_flotas_estimaciones.json')
+    r = requests.get(TRIP_UPDATES)
     data = r.json()
-    
+
     fm = buildHeader()
     for item in data['resources']:
         timez = dateutil.parser.parse(item['ayto:fechActual']) #Hora UTC
         fe = fm.entity.add()
-        
+
         fe.id = 'trip_update_' + str(item['ayto:etiqLinea']) + '_' + str(item['dc:identifier']) #¡OJO! No tenemos el ID del vehículo pero es opcional
-        
-        fe.trip_update.trip.trip_id = 'kkkk'
-        fe.trip_update.trip.route_id = str(item['ayto:etiqLinea'])
-        
+
+
+        #Las líneas 17 y 18 tienes recorridos e id_route diferentes según horario pero esto no se recoge en el
+        #feed de Santander Datos Abiertos, por lo que hay que determinarlo a través del conteniedo del item 'ayto:destino1'
+        destination = item['ayto:destino1'].encode('utf-8').lower()
+
+#         fe.trip_update.trip.trip_id = 'TUS-2-INV-O-LI-COR1722GES' #'TUS-2-INV-SI-COR1814GES'#item['ayto:destino1'].encode('utf-8')
+
+        if str(item['ayto:etiqLinea']) == '17' and destination.find('bº la torre') == -1:
+            fe.trip_update.trip.route_id = 'TUS-' + str(item['ayto:etiqLinea']) + '-1'
+        elif str(item['ayto:etiqLinea']) == '17' and destination.find('bº la torre') != -1:
+            fe.trip_update.trip.route_id = 'TUS-' + str(item['ayto:etiqLinea']) + '-2'
+        elif str(item['ayto:etiqLinea']) == '18' and destination.find('por corbanera') != -1:
+            fe.trip_update.trip.route_id = 'TUS-' + str(item['ayto:etiqLinea']) + '-1'
+        elif str(item['ayto:etiqLinea']) == '18' and destination.find('por corbanera') == -1:
+           fe.trip_update.trip.route_id = 'TUS-' + str(item['ayto:etiqLinea'])  + '-2'
+        else:
+            fe.trip_update.trip.route_id = 'TUS-' + str(item['ayto:etiqLinea'])
+
         stu = fe.trip_update.stop_time_update.add()
         stu.arrival.time = int(time.mktime(timez.timetuple())) + int(item['ayto:tiempo1']) #Tiempo UNIX estimado de llegada.
         stu.stop_id = str(item['ayto:paradaId'])
-        
+
         fe.trip_update.vehicle.label = str(item['ayto:etiqLinea'])
 
     return fm
@@ -107,20 +124,19 @@ def home():
 <li><a href="http://gtfs-altergeo.rhcloud.com/trip-updates/debug">http://gtfs-altergeo.rhcloud.com/trip-updates/debug</a>&nbsp;- For estimate arrival time updates</li>
 <li><a href="http://gtfs-altergeo.rhcloud.com/vehicle-positions/debug">http://gtfs-altergeo.rhcloud.com/vehicle-positions/debug</a>&nbsp;- For vehicle positions</li>
 </ul>
-<p>And Protocol Buffer Format (should be used by apps):</p>
+<p>And Protocol Buffer Format (more smaller and faster, should be used by apps):</p>
 <ul>
 <li><a href="http://gtfs-altergeo.rhcloud.com/trip-updates">http://gtfs-altergeo.rhcloud.com/trip-updates</a>&nbsp;- For estimate arrival time updates</li>
 <li><a href="http://gtfs-altergeo.rhcloud.com/vehicle-positions">http://gtfs-altergeo.rhcloud.com/vehicle-positions</a>&nbsp;- For vehicle positions</li>
 </ul>'''
 
-
-
-
     return html
+
 
 @app.route('/vehicle-positions')
 def feedVehiclePosition():
     return send_file(io.BytesIO(buildVehiclePosition().SerializeToString()))
+
 
 @app.route('/vehicle-positions/debug')
 def debugFeedVehiclePosition():
@@ -134,6 +150,7 @@ def debugFeedVehiclePosition():
 def feedTripUpdate():
     return send_file(io.BytesIO(buildTripUpdate().SerializeToString()))
 
+
 @app.route('/trip-updates/debug')
 def debugFeedTripUpdate():
     feedjson = text_format.MessageToString(buildTripUpdate())
@@ -142,10 +159,25 @@ def debugFeedTripUpdate():
     return response
 
 
+@app.route('/callback')
+def Organicitycallback():
+    error = request.args.get('error', '')
+    if error:
+        return "Error: " + error
+    state = request.args.get('state', '')
+    if not is_valid_state(state):
+        # Uh-oh, this request wasn't started by us!
+        abort(403)
+    code = request.args.get('code')
+    print code
+    # We'll change this next line in just a moment
+    return "got a code! %s" % code
+
+
 if __name__ == "__main__":
         #host = os.environ['OPENSHIFT_PYTHON_IP']
         #port = int(os.environ['OPENSHIFT_PYTHON_PORT'])
-        
+
     if 'OPENSHIFT_PYTHON_IP' in os.environ:
         from wsgiref.simple_server import make_server
         httpd = make_server('OPENSHIFT_PYTHON_IP', 8051, app)
@@ -155,5 +187,3 @@ if __name__ == "__main__":
         httpd.serve_forever()
     else:
         app.run(debug=True)
-
-    

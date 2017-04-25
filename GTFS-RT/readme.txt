@@ -1,0 +1,1 @@
+A GTFS feed server. This service provide real-time public transport information under the GTFS Realtime standard for Urban Transport of Santander (TUS) agency, making public transit data readily available so developers can consume the data to build applications that simplify navigating transit systems. 

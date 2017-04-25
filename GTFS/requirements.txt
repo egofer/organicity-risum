@@ -1,0 +1,3 @@
+pyspatialite>=3.0.1
+transitfeed>=1.2.14
+pygame>=1.9.3
