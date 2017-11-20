@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 
 '''
-Genera feeds GTFS en tiempo real a partir de datos de la empresa de autobuses TUS
-En OpenShift puede que requiera el parámetro --no-cache-dir:
+Generate real-time GTFS feeds from TUS bus company data
+In OpenShift you may require the parameter --no-cache-dir:
 pip install paquete --no-cache-dir
 pip freeze
 '''
 
 __author__ = "Emilio Gomez Fernandez"
+__copyright__ = "Copyright 2017, Emilio Gomez Fernandez"
 
 __version__ = "0.5"
 __maintainer__ = "Emilio Gomez Fernandez"
@@ -29,26 +30,26 @@ from flask import Flask, send_file, make_response, abort, request
 from argparse import ArgumentParser
 
 DIR_TMP = '/tmp/'
+# DIR_TMP = os.environ["OPENSHIFT_TMP_DIR"]
 DIR_TMP = os.environ["OPENSHIFT_DATA_DIR"]
 app = Flask(__name__)
 
 # Feed Header
 
-
 def buildHeader():
     fm = gtfsrtpb.FeedMessage()
     fh = fm.header
     fh.gtfs_realtime_version = "0.5"
-    # Determina si la búsqueda actual es incremental (valor por defecto).
+    # Determines whether the current search is incremental (default value).
     fh.incrementality = 0
-    # Momento en que se creó el contenido de este feed (en tiempo del
-    # servidor). En tiempo UNIX.
+    # Time when the content of this feed was created (in server time). 
+    # In UNIX time.
     fh.timestamp = int(time.mktime(datetime.datetime.now().timetuple()))
     return fm
 
 
 def buildVehiclePosition():
-    """Construye un feed GTFS real-time de l posición de los autobuses del TUS"""
+    """Build a GTFS real-time feed on the position of TUS buses"""
 
     con = sqlite3.connect(DIR_TMP + 'bustus.sqlite')
     cursor = con.cursor()
@@ -66,37 +67,37 @@ def buildVehiclePosition():
     vehiculos = cursor.fetchall()
     fm = buildHeader()
     for item in vehiculos:
-        timez = dateutil.parser.parse(item[1])  # Hora UTC ('ayto:instante')
+        timez = dateutil.parser.parse(item[1])  # UTC Time ('ayto:instante')
         fe = fm.entity.add()
         fe.id = 'vehicle_position_' + str(item[2])
 
-        # ¡OJO! REVISAR: El trip_id del feed GTFS al cual hace referencia este selector.
-        fe.vehicle.trip.trip_id = str(item[0])  # ID del viaje ()'trip_id').
-        # SCHEDULED: Viaje que se está ejecutando de acuerdo con su programa de
-        # GTFS (lo suficientemente parecido a él).
+        #  Trip ID (' trip_id').
+        fe.vehicle.trip.trip_id = str(item[0])
+        # SCHEDULED: Trip that is running according to its GTFS schedule
+        # (sufficiently similar to it).
         fe.vehicle.trip.schedule_relationship = 0
-        # Se ajusta el route_id al identificador del GTFS añadiendo el prefijo
+        # The route_id is set to the GTFS identifier by adding the prefix
         # 'TUS-' ('ayto:linea')
         fe.vehicle.trip.route_id = 'TUS-' + str(item[4])
 
-        # Momento en el cual se midió la posición del autobús. En tiempo UNIX.
+        # Moment at which the position of the bus was measured. In UNIX time.
         fe.vehicle.timestamp = int(time.mktime(timez.timetuple()))
-        # Identificación interna del sistema para el autobus ('ayto:vehiculo').
+        # Internal identification of the system for the bus ('ayto: vehiculo').
         fe.vehicle.vehicle.id = str(item[2])
-        # Etiqueta visible para el usuario que se debe mostrar al pasajero para
-        # ayudarlo a identificar el bus ('ayto:coche').
+        # Visible label for the user which must be shown to the passenger 
+        # to help him identify the bus ('ayto: coche').
         fe.vehicle.vehicle.label = str(item[5])
-        # Latitud en sistema de coordenadas WGS-84 (EPSG:4326)
+        # Latitude (EPSG:4326)
         # ('wgs84_pos:lat').
         fe.vehicle.position.latitude = float(item[6])
-        # Longitud en sistema de coordenadas WGS-84 (EPSG:4326)
+        # Longitude (EPSG: 4326)
         # ('wgs84_pos:long').
         fe.vehicle.position.longitude = float(item[7])
-        # Velocidad del bus en m/s ('ayto:velocidad').
+        # Bus speed in m/s ('ayto:velocidad').
         fe.vehicle.position.speed = float(item[8]) * 1000 / 3600
-        fe.vehicle.congestion_level = 0  # Nivel de congestión del tráfico.
-        # El vehículo ha partido y está en tránsito hacia la siguiente parada
-        # (valor por defecto). ¿Se puede inferir de "ayto:estado"?
+        # Level of traffic congestion.
+        fe.vehicle.congestion_level = 0
+        # The vehicle has departed and is in transit to the next stop
         fe.vehicle.current_status = 2
 
     return fm
@@ -104,7 +105,7 @@ def buildVehiclePosition():
 
 # Feed Trip Updates
 def buildTripUpdate():
-    u"""Construye  el feed GTFS Real-Time de actualizaciones de viajes (trip update)"""
+    u"""Build the GTFS Real-Time feed for travel updates (trip update)"""
 
     con = sqlite3.connect(DIR_TMP + 'bustus.sqlite')
     cursor = con.cursor()
@@ -123,7 +124,6 @@ def buildTripUpdate():
         timez = dateutil.parser.parse(item[1])  # Hora UTC
         fe = fm.entity.add()
 
-        # ¡OJO! No tenemos el ID del vehículo pero es opcional
         fe.id = 'trip_update_' + str(item[2]) + '_' + str(item[3])
         tbus = dateutil.parser.parse(item[1])
 
@@ -133,20 +133,16 @@ def buildTripUpdate():
         t1 = utc.localize(t1)
         t2 = utc.localize(t2)
 
-        if tbus >= t1 and tbus <= t2:  # Autobuses nocturnos que salen el día anterior.
+        if tbus >= t1 and tbus <= t2:  # Night buses departing the day before.
             tbus = tbus - datetime.timedelta(days=1)
             fe.trip_update.trip.start_date = str(tbus)
         else:
             fe.trip_update.trip.start_date = str(
-                tbus.date())  # Fecha de salida del viaje
+                tbus.date())  # Date of departure of the trip
 
-        # Las líneas 17 y 18 tienen recorridos e id_route diferentes según horario pero esto no se recoge en el
-        # feed de Santander Datos Abiertos, por lo que hay que determinarlo a
-        # través del contenido del item 'ayto:destino1'
-        destination = item[4].encode('utf-8').lower()
-
-        # fe.trip_update.trip.trip_id = 'TUS-2-INV-O-LI-COR1722GES'
-        # #'TUS-2-INV-SI-COR1814GES'#item['ayto:destino1'].encode('utf-8')
+        # Lines 17 and 18 have different routes and 'id_route' according to schedule, 
+        # but this is not included in the Open Data Santander feed, 
+        # so we must determine it through the content of the item 'ayto: destino1'
         if str(item[2]) == '17' and destination.find('bº la torre') == -1:
             fe.trip_update.trip.route_id = 'TUS-' + str(item[2]) + '-1'
         elif str(item[2]) == '17' and destination.find('bº la torre') != -1:
@@ -159,7 +155,7 @@ def buildTripUpdate():
             fe.trip_update.trip.route_id = 'TUS-' + str(item[2])
 
         stu = fe.trip_update.stop_time_update.add()
-        # Tiempo UNIX estimado de llegada.
+        # ETA in UNIX time
         stu.arrival.time = int(time.mktime(timez.timetuple())) + int(item[5])
         stu.stop_id = str(item[6])
 
