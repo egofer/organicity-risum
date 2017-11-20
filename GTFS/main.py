@@ -8,7 +8,7 @@ python main.py -osm -shp -fv -sv
 """
 
 __author__ = "Emilio Gomez Fernandez"
-__copyright__ = "Copyright 2017, RISUM Project"
+__copyright__ = "RISUM Project"
 
 __version__ = "0.2"
 __maintainer__ = "Emilio Gomez Fernandez"
