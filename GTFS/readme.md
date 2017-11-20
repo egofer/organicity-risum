@@ -2,9 +2,9 @@ A static GTFS generator for Urban Transport of Santander (TUS) agency. Create a 
 
 Install
 ---------
-
+```python
 pip install -r requirements.txt
 
 python main.py --help
-
+```
 
