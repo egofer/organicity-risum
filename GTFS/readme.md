@@ -4,8 +4,6 @@ Install
 ---------
 
 pip install -r requirements.txt
+python main.py --help
 
-download.py Download the necessary data from the open data portal of the city of Santander and process them.
-
-server.py Provides two types of data using GTFS-realtime feed: vehicle positions and trip updates.
 
