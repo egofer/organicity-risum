@@ -9,7 +9,6 @@ pip freeze
 '''
 
 __author__ = "Emilio Gomez Fernandez"
-__copyright__ = "Copyright 2017, Emilio Gomez Fernandez"
 
 __version__ = "0.5"
 __maintainer__ = "Emilio Gomez Fernandez"
